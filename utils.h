@@ -34,8 +34,7 @@ void set_non_blocking(int sockfd) {
 ssize_t send_all(int sockfd, const char *buffer, size_t len) {
     size_t total_sent = 0;
     while (total_sent < len) {
-        ssize_t bytes_sent =
-            send(sockfd, buffer + total_sent, len - total_sent, 0);
+        ssize_t bytes_sent = send(sockfd, buffer + total_sent, len - total_sent, 0);
         if (bytes_sent == -1) {
             perror("send failed");
             return -1;
@@ -46,13 +45,11 @@ ssize_t send_all(int sockfd, const char *buffer, size_t len) {
 }
 
 ssize_t recv_all(int sockfd, char *buffer, size_t buffer_size) {
-    ssize_t total_received = 0;  // 累计接收到的数据字节数
+    ssize_t total_received = 0;
     ssize_t bytes_received = 0;
 
-    // 循环接收数据，直到没有数据可读
     while (total_received < buffer_size) {
-        bytes_received = recv(sockfd, buffer + total_received,
-                              buffer_size - total_received, 0);
+        bytes_received = recv(sockfd, buffer + total_received, buffer_size - total_received, 0);
 
         if (bytes_received > 0) {
             total_received += bytes_received;

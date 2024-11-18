@@ -11,7 +11,7 @@
 
 int main() {
     int server_sock, epoll_fd, nfds, client_sock;
-    struct sockaddr_in server_addr, client_addr;
+    struct sockaddr_in server_addr, client_addr[FD_SETSIZE];
     socklen_t addr_size;
     struct epoll_event event, events[MAX_EVENTS];
     int client_fds[MAX_EVENTS];
@@ -22,8 +22,7 @@ int main() {
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(PORT);
 
-    if (bind(server_sock, (struct sockaddr *)&server_addr,
-             sizeof(server_addr)) == -1) {
+    if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
         perror("Bind failed");
         close(server_sock);
         exit(1);
@@ -57,23 +56,21 @@ int main() {
         nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
         for (int i = 0; i < nfds; i++) {
             if (events[i].data.fd == server_sock) {
-                addr_size = sizeof(client_addr);
-                client_sock = accept(
-                    server_sock, (struct sockaddr *)&client_addr, &addr_size);
+                struct sockaddr_in addr;
+                addr_size = sizeof(addr);
+                client_sock = accept(server_sock, (struct sockaddr *)&addr, &addr_size);
                 if (client_sock == -1) {
                     perror("Accept failed");
                     continue;
                 }
 
-                printf("Client connected: %s:%d\n",
-                       inet_ntoa(client_addr.sin_addr),
-                       ntohs(client_addr.sin_port));
+                printf("Client connected: %s:%d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+                memcpy(&client_addr[client_sock], &addr, addr_size);
 
                 set_non_blocking(client_sock);
                 event.events = EPOLLIN | EPOLLET;
                 event.data.fd = client_sock;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_sock, &event) ==
-                    -1) {
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_sock, &event) == -1) {
                     perror("Epoll ctl failed");
                     close(client_sock);
                     continue;
@@ -83,8 +80,7 @@ int main() {
 
             } else if (events[i].events & EPOLLIN) {
                 char buf[MAX_BUFFER];
-                ssize_t bytes_received =
-                    recv_all(events[i].data.fd, buf, MAX_BUFFER);
+                ssize_t bytes_received = recv_all(events[i].data.fd, buf, MAX_BUFFER);
                 if (bytes_received <= 0) {
                     // 客户端断开连接
                     close(events[i].data.fd);
@@ -95,11 +91,15 @@ int main() {
                         }
                     }
                 } else {
+                    char str[INET_ADDRSTRLEN + 16];
+                    snprintf(str, sizeof(str), "From %s:%d  ", inet_ntoa(client_addr[events[i].data.fd].sin_addr),
+                             ntohs(client_addr[events[i].data.fd].sin_port));
                     buf[bytes_received] = '\0';
-                    printf("Received: %s", buf);
+                    printf("Received %s%s", str, buf);
                     // 广播消息给其他客户端
                     for (int j = 0; j < num_clients; j++) {
                         if (client_fds[j] != events[i].data.fd) {
+                            send_all(client_fds[j], str, strlen(str) - 1);
                             send_all(client_fds[j], buf, bytes_received);
                         }
                     }
