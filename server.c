@@ -1,28 +1,74 @@
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
 #include <unistd.h>
 
+#include "coheader.h"
+#include "coroutine.h"
+#include "hook.h"
 #include "utils.h"
+fdNode* head;
 
-#define MAX_EVENTS 10
+void* handle_client(const void* arg) {
+    client_info* info = (client_info*)arg;
+    int fd = info->fd;
+    struct sockaddr_in addr = info->addr;
+    char buf[MAX_BUFFER];
+    //添加到全局的链表
+    fdNode* node = make_fdNode(fd);
+    node->next = head->next;
+    head->next = node;
+
+    while (1) {
+        ssize_t bytes_received = recv(fd, buf, MAX_BUFFER, 0);
+        if (bytes_received <= 0) {
+            // 客户端断开连接
+            printf("Server disconnected!\n");
+            close(fd);
+            fdNode* p = head;
+            //从链表中移除
+            while (p->next) {
+                if (p->next->fd == fd) {
+                    fdNode* tmp = p->next;
+                    p->next = tmp->next;
+                    free(tmp);
+                    break;
+                }
+                p = p->next;
+            }
+            return NULL;
+        } else {
+            char str[INET_ADDRSTRLEN + 16];
+            snprintf(str, sizeof(str), "From %s:%d  ", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+            buf[bytes_received] = '\0';
+            printf("Received %s%s", str, buf);
+            // 广播消息给其他客户端
+            fdNode* p = head;
+            while (p->next) {
+                p = p->next;
+                if (p->fd == fd) continue;
+                send(p->fd, str, strlen(str) - 1, 0);
+                send(p->fd, buf, bytes_received, 0);
+            }
+        }
+    }
+}
 
 int main() {
-    int server_sock, epoll_fd, nfds, client_sock;
-    struct sockaddr_in server_addr, client_addr[FD_SETSIZE];
+    int server_sock, client_sock;
+    struct sockaddr_in server_addr;
     socklen_t addr_size;
-    struct epoll_event event, events[MAX_EVENTS];
-    int client_fds[MAX_EVENTS];
-    int num_clients = 0;
+    head = (fdNode*)calloc(1, sizeof(fdNode));
 
     server_sock = create_socket();
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(PORT);
 
-    if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+    if (bind(server_sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
         perror("Bind failed");
         close(server_sock);
         exit(1);
@@ -33,81 +79,21 @@ int main() {
         close(server_sock);
         exit(1);
     }
-
-    epoll_fd = epoll_create1(0);
-    if (epoll_fd == -1) {
-        perror("Epoll create failed");
-        close(server_sock);
-        exit(1);
-    }
-
-    set_non_blocking(server_sock);
-    event.events = EPOLLIN | EPOLLET;
-    event.data.fd = server_sock;
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_sock, &event) == -1) {
-        perror("Epoll ctl failed");
-        close(server_sock);
-        exit(1);
-    }
-
+    enable_hook();
     printf("Server started, waiting for clients...\n");
 
     while (1) {
-        nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-        for (int i = 0; i < nfds; i++) {
-            if (events[i].data.fd == server_sock) {
-                struct sockaddr_in addr;
-                addr_size = sizeof(addr);
-                client_sock = accept(server_sock, (struct sockaddr *)&addr, &addr_size);
-                if (client_sock == -1) {
-                    perror("Accept failed");
-                    continue;
-                }
-
-                printf("Client connected: %s:%d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
-                memcpy(&client_addr[client_sock], &addr, addr_size);
-
-                set_non_blocking(client_sock);
-                event.events = EPOLLIN | EPOLLET;
-                event.data.fd = client_sock;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_sock, &event) == -1) {
-                    perror("Epoll ctl failed");
-                    close(client_sock);
-                    continue;
-                }
-
-                client_fds[num_clients++] = client_sock;
-
-            } else if (events[i].events & EPOLLIN) {
-                char buf[MAX_BUFFER];
-                ssize_t bytes_received = recv_all(events[i].data.fd, buf, MAX_BUFFER);
-                if (bytes_received <= 0) {
-                    // 客户端断开连接
-                    close(events[i].data.fd);
-                    for (int j = 0; j < num_clients; j++) {
-                        if (client_fds[j] == events[i].data.fd) {
-                            client_fds[j] = client_fds[--num_clients];
-                            break;
-                        }
-                    }
-                } else {
-                    char str[INET_ADDRSTRLEN + 16];
-                    snprintf(str, sizeof(str), "From %s:%d  ", inet_ntoa(client_addr[events[i].data.fd].sin_addr),
-                             ntohs(client_addr[events[i].data.fd].sin_port));
-                    buf[bytes_received] = '\0';
-                    printf("Received %s%s", str, buf);
-                    // 广播消息给其他客户端
-                    for (int j = 0; j < num_clients; j++) {
-                        if (client_fds[j] != events[i].data.fd) {
-                            send_all(client_fds[j], str, strlen(str) - 1);
-                            send_all(client_fds[j], buf, bytes_received);
-                        }
-                    }
-                }
-            }
+        struct sockaddr_in addr;
+        socklen_t addr_size = sizeof(addr);
+        int client_sock = accept(server_sock, (struct sockaddr*)&addr, &addr_size);
+        if (client_sock == -1) {
+            perror("Accept failed");
+            continue;
         }
+        printf("Client connected: %s:%d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+        // handle_client与主程序功能上相互独立，没有同步需求，并且主程序不会结束，所以不需要join，也就不需要保存handle
+        coroutine_create(handle_client, make_info(client_sock, addr), 0);
     }
-
     close(server_sock);
     return 0;
 }
