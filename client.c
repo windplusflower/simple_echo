@@ -7,9 +7,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "coheader.h"
 #include "utils.h"
 
-static const MAX_EVENTS = 2;
+static const int MAX_EVENTS = 2;
 
 // 处理标准输入
 void handle_stdin_input(int sockfd) {
