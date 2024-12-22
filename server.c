@@ -44,6 +44,7 @@ void* handle_client(const void* arg) {
             char str[INET_ADDRSTRLEN + 16];
             snprintf(str, sizeof(str), "From %s:%d  ", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
             buf[bytes_received] = '\0';
+            if (buf[0] == '\n') continue;
             printf("Received %s%s", str, buf);
             // 广播消息给其他客户端
             fdNode* p = head;
@@ -91,8 +92,9 @@ int main() {
             continue;
         }
         printf("Client connected: %s:%d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
-        // handle_client与主程序功能上相互独立，没有同步需求，并且主程序不会结束，所以不需要join，也就不需要保存handle
-        coroutine_create(handle_client, make_info(client_sock, addr), 0);
+        // handle_client与主程序功能上相互独立，没有同步需求，并且主程序不会结束，所以不需要join。
+        coroutine_t co = coroutine_create(handle_client, make_info(client_sock, addr), 0);
+        coroutine_detach(co);
     }
     close(server_sock);
     return 0;
