@@ -8,12 +8,10 @@
 #include <unistd.h>
 
 #include "coheader.h"
-#include "coroutine.h"
-#include "hook.h"
 #include "utils.h"
 
 // 处理标准输入
-void* handle_stdin_input(const void* arg) {
+void* handle_stdin_input(void* arg) {
     int sockfd = *(int*)arg;
     char buffer[MAX_BUFFER];
     while (1) {
@@ -23,7 +21,7 @@ void* handle_stdin_input(const void* arg) {
 }
 
 // 处理网络输入
-void* handle_network_input(const void* arg) {
+void* handle_network_input(void* arg) {
     int sockfd = *(int*)arg;
     char buffer[MAX_BUFFER];
     while (1) {
@@ -36,6 +34,7 @@ void* handle_network_input(const void* arg) {
 }
 
 int main() {
+    enable_hook();
     int sockfd = create_socket();
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -49,7 +48,6 @@ int main() {
             exit(EXIT_FAILURE);
         }
     }
-    enable_hook();
     coroutine_t input, network;
     input = coroutine_create(handle_stdin_input, &sockfd, 0);
     network = coroutine_create(handle_network_input, &sockfd, 0);

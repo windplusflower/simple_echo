@@ -1,3 +1,4 @@
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -7,12 +8,10 @@
 #include <unistd.h>
 
 #include "coheader.h"
-#include "coroutine.h"
-#include "hook.h"
 #include "utils.h"
 fdNode* head;
 
-void* handle_client(const void* arg) {
+void* handle_client(void* arg) {
     client_info* info = (client_info*)arg;
     int fd = info->fd;
     struct sockaddr_in addr = info->addr;
@@ -59,6 +58,7 @@ void* handle_client(const void* arg) {
 }
 
 int main() {
+    enable_hook();
     int server_sock, client_sock;
     struct sockaddr_in server_addr;
     socklen_t addr_size;
@@ -80,7 +80,6 @@ int main() {
         close(server_sock);
         exit(1);
     }
-    enable_hook();
     printf("Server started, waiting for clients...\n");
 
     while (1) {
